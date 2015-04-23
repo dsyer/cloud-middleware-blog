@@ -4,7 +4,7 @@ In this article we look at how to bind a Spring Boot application to data service
 
 There is some [simple source code](https://github.com/dsyer/cloud-middleware-blog) accompanying this article. To use it you can clone the repository and import it into your favourite IDE. You will need to remove two dependencies from the complete project to get to the same point where we start discussing concrete code samples, namely `spring-boot-starter-cloud-connectors` and `auto-reconfiguration`.
 
-## Layers of Autconfiguration
+## Layers of Autoconfiguration
 
 Let's take a a simple app with `DataSource` (similar considerations apply to RabbitMQ, Mongo, Redis, Elasticsearch, etc.):
 
@@ -32,7 +32,7 @@ Consider what happens when:
 
 * Add `spring-boot-starter-cloud-connectors` to the classpath: no change in `DataSource` because the Spring Cloud Connectors do not detect that they are running in a Cloud platform. The providers that come with the starter all look for specific environment variables, which they won't find unless you set them, or run the app in Cloud Foundry, Heroku, etc.
 
-* Run the application in "cloud" profile with `spring.profiles.active=cloud`: no change yet, but this is one of the things that Spring Cloud Connectors is looking for as a "tell" that the app is running in Cloud Foundry. The "cloud" profile in Cloud Foundry is provided to Spring applications via the auto-reconfiguration jar that is added to the classpath by the [Java buildpack](https://github.com/cloudfoundry/java-buildpack).
+* Run the application in "cloud" profile with `spring.profiles.active=cloud`: no change yet, but this is one of the things that [Java buildpack](https://github.com/cloudfoundry/java-buildpack) is looking for as a "tell" that the app is running in Cloud Foundry. The "cloud" profile in Cloud Foundry is provided to Spring applications via the auto-reconfiguration jar that is added to the classpath by the Java buildpack.
 
 * Run in "cloud" profile and provide some environment variables simulating running in Cloud Foundry and binding to a MySQL service:
 ```
@@ -41,11 +41,11 @@ VCAP_SERVICES={"mysql":[{"name":"mysql","tags":["mysql"],"credentials":{"uri":"j
 ```
 (the "tags" provides a hint that we want to create a MySQL `DataSource`, the "uri" provides the location, and the "name" becomes a bean ID). Still nothing changes in the `DataSource` (it is still H2) because Spring Cloud Connectors by themselves don't create a `DataSource`. Spring Boot has some autoconfiguration for the Connectors, so if you looked at the beans in your application you would see a `CloudFactory`, but it's up to you to use that if you want it to create a `DataSource` for you (see below).
 
-* Add the "auto-reconfiguration" JAR from the Java buildpack (Maven co-ordinates `org.cloudfoundry:auto-reconfiguration:1.7.0.RELEASE`). You can add it as a local dependency to simulate running an application in Cloud Foundry, but it wouldn't be normal to do this with a real application (this is just for experimenting with autoconfiguration). The auto-reconfiguration JAR now has everything it need to create a `DataSource`, but it still doesn't (yet) because it detects that you already have a bean of type `CloudFactory`, and one was added by Spring Boot.
+* Add the "auto-reconfiguration" JAR from the Java buildpack (Maven co-ordinates `org.cloudfoundry:auto-reconfiguration:1.7.0.RELEASE`). You can add it as a local dependency to simulate running an application in Cloud Foundry, but it wouldn't be normal to do this with a real application (this is just for experimenting with autoconfiguration). The auto-reconfiguration JAR now has everything it needs to create a `DataSource`, but it still doesn't (yet) because it detects that you already have a bean of type `CloudFactory`, one that was added by Spring Boot.
 
-* Remove the explicit "cloud" profile. The profile will still be active because the auto-reconfiguration JAR adds it back again. There is no change to the `DataSource` because Spring Boot has created a `CloudFactory` for you and the auto-reconfiguration JAR assumes that means you are going to use it. No change in the `DataSource` (still H2).
+* Remove the explicit "cloud" profile. The profile will still be active when your app starts because the auto-reconfiguration JAR adds it back again. There is still no change to the `DataSource` because Spring Boot has created a `CloudFactory` for you.
 
-* Remove the `spring-boot-starter-cloud-connectors` dependency, so that Spring Boot backs off creating a `CloudFactory`. The auto-reconfiguration JAR actually has its own copy of Spring Cloud Connectors (all the classes with different package names) and it now uses them to create a `DataSource` (in a `BeanFactoryPostProcessor`). Spring Boot backs off its `DataSourceAutoConfiguration` and you have a different `DataSource`, finally binding to MySQL via the `VCAP_SERVICES`. There is no control over pool properties, but it does still use the Tomcat pool if available (no support for Hikari or DBCP2).
+* Remove the `spring-boot-starter-cloud-connectors` dependency, so that Spring Boot backs off creating a `CloudFactory`. The auto-reconfiguration JAR actually has its own copy of Spring Cloud Connectors (all the classes with different package names) and it now uses them to create a `DataSource` (in a `BeanFactoryPostProcessor`). Spring Boot also backs off its `DataSourceAutoConfiguration` and you have a different `DataSource`, finally binding to MySQL via the `VCAP_SERVICES`. There is no control over pool properties, but it does still use the Tomcat pool if available (no support for Hikari or DBCP2).
 
 * Remove the auto-reconfiguration JAR and the `DataSource` reverts to H2.
 
@@ -66,7 +66,7 @@ etc.
 
 ## Create your own DataSource
 
-The last section walked through most of the important autoconfiguration features in the various libraries. If you want to take control yourself, the main thing you need to do is create your own instance of `DataSource`. You could do that using a `DataSourceBuilder` which is a convenience class and comes as part of Spring Boot (it chooses an implementation based on the classpath). For example:
+The last section walked through most of the important autoconfiguration features in the various libraries. If you want to take control yourself, one thing you start with is to create your own instance of `DataSource`. You could do that, for instance, using a `DataSourceBuilder` which is a convenience class and comes as part of Spring Boot (it chooses an implementation based on the classpath):
 
 ```java
 @SpringBootApplication
@@ -214,7 +214,7 @@ spring.datasource.password: ${vcap.services.mysql.credentials.password:}
 spring.datasource.testOnBorrow: true
 ```
 
-The "mysql` part of the property names is the service name in Cloud Foundry (so it is set by the user). And of course the same pattern applies to all kinds of services, not just a JDBC `DataSource`. The only limitation of this approach is if the application needs to configure beans that are not provided by Spring Boot out of the box (e.g. if you need 2 `DataSources`), in which case you have to write Java code anyway, and may or may not choose to use properties files to parameterize it. Generally speaking it is good practice to use external configuration and in particular `@ConfigurationPropertues` since they allow maximum flexibility, for instance to override using System properties or environment variables at runtime.
+The "mysql" part of the property names is the service name in Cloud Foundry (so it is set by the user). And of course the same pattern applies to all kinds of services, not just a JDBC `DataSource`. The only limitation of this approach is if the application needs to configure beans that are not provided by Spring Boot out of the box (e.g. if you need 2 `DataSources`), in which case you have to write Java code anyway, and may or may not choose to use properties files to parameterize it. Generally speaking it is good practice to use external configuration and in particular `@ConfigurationPropertues` since they allow maximum flexibility, for instance to override using System properties or environment variables at runtime.
 
 > Note: similar features are provided by the Cloud Foundry buildpack, which provides `cloud.services.*` instead of `vcap.services.*`, so you actually end up with more than one way to do this. 
 
@@ -239,7 +239,7 @@ public class LocalDataSourceConfiguration {
 
 ## A Third Way: Discover the Credentials and Bind Manually
 
-Another approach that lends itself to plaform and environment independence is to declare explicit bean definitions for the `@ConfigurationProperties` beans that Spring Boot uses to bind its autoconfigured connectors. For instance, to set the default values for a `DataSource` you can declare a `@Bean` of type `DataSourceProperties`:
+Another approach that lends itself to platform and environment independence is to declare explicit bean definitions for the `@ConfigurationProperties` beans that Spring Boot uses to bind its autoconfigured connectors. For instance, to set the default values for a `DataSource` you can declare a `@Bean` of type `DataSourceProperties`:
 
 ```java
 @Bean
