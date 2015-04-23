@@ -1,6 +1,6 @@
 # Binding to Data Services with Spring Boot in Cloud Foundry
 
-In this article we look at how to bind to data services (JDBC, NoSQL, messaging etc.) and the various sources of default and automatic behaviour for a Spring application in Cloud Foundry, providing some guidance about which ones to use and which ones will be active under what conditions. Spring Boot provides a lot of autoconfiguration and external binding features, some of which are relevant to Cloud Foundry, and many of which are not. Spring Cloud Connectors is a library that you can use in your application if you want to create your own components programmatically, but it doesn't do anything "magical" by itself. And finally there is the Cloud Foundry buildpack which has an "auto-reconfiguration" feature that tries to ease the burden of moving simple applications to the cloud. The key to correctly configuring middleware services, like JDBC or AMQP or Mongo, is to understand what each of these tools provides, how they influence each other at runtime, and and to switch parts of them on and off. The goal should be a smooth transition from local execution of an application on a developer's desktop to a test environment in Cloud Foundry, and ultimately to production in Cloud Foundry (or otherwise) with no changes in source code or packaging, per the [twelve-factor application](http://12factor.net) guidelines.
+In this article we look at how to bind a Spring Boot application to data services (JDBC, NoSQL, messaging etc.) and the various sources of default and automatic behaviour in Cloud Foundry, providing some guidance about which ones to use and which ones will be active under what conditions. Spring Boot provides a lot of autoconfiguration and external binding features, some of which are relevant to Cloud Foundry, and many of which are not. Spring Cloud Connectors is a library that you can use in your application if you want to create your own components programmatically, but it doesn't do anything "magical" by itself. And finally there is the Cloud Foundry buildpack which has an "auto-reconfiguration" feature that tries to ease the burden of moving simple applications to the cloud. The key to correctly configuring middleware services, like JDBC or AMQP or Mongo, is to understand what each of these tools provides, how they influence each other at runtime, and and to switch parts of them on and off. The goal should be a smooth transition from local execution of an application on a developer's desktop to a test environment in Cloud Foundry, and ultimately to production in Cloud Foundry (or otherwise) with no changes in source code or packaging, per the [twelve-factor application](http://12factor.net) guidelines.
 
 There is some [simple source code](https://github.com/dsyer/cloud-middleware-blog) accompanying this article. To use it you can clone the repository and import it into your favourite IDE. You will need to remove two dependencies from the complete project to get to the same point where we start discussing concrete code samples, namely `spring-boot-starter-cloud-connectors` and `auto-reconfiguration`.
 
@@ -51,9 +51,9 @@ VCAP_SERVICES={"mysql":[{"name":"mysql","tags":["mysql"],"credentials":{"uri":"j
 
 > TIP: use web and actuator starters with `endpoints.health.sensitive=false` to inspect the `DataSource` quickly through "/health". You can also use the "/beans", "/env" and "/autoconfig" endpoints to see what is going in in the autoconfigurations and why.
 
-> NOTE: Running in Cloud Foundry or including auto-reconfiguration JAR in classpath locally both activate "cloud" profile (for the same reason). The `VCAP_*` env vars are the thing that makes Spring Cloud create beans.
+> NOTE: Running in Cloud Foundry or including auto-reconfiguration JAR in classpath locally both activate the "cloud" profile (for the same reason). The `VCAP_*` env vars are the thing that makes Spring Cloud and/or the auto-reconfiguration JAR create beans.
 
-The auto-reconfiguration JAR is always on the classpath in Cloud Foundry (by default) but it backs off creating any `DataSource` if it finds a `org.springframework.cloud.CloudFactory` bean (which is provided by Spring Boot). The net effect of adding it to the classpath, if the Connectors are also present in a Spring Boot application, is to enable the "cloud" profile automatically. You can see it making the decision to skip auto-reconfiguration in the application logs on startup:
+The auto-reconfiguration JAR is always on the classpath in Cloud Foundry (by default) but it backs off creating any `DataSource` if it finds a `org.springframework.cloud.CloudFactory` bean (which is provided by Spring Boot). Thus the net effect of adding it to the classpath, if the Connectors are also present in a Spring Boot application, is only to enable the "cloud" profile automatically. You can see it making the decision to skip auto-reconfiguration in the application logs on startup:
 
 ```
 015-04-14 15:11:11.765  INFO 12727 --- [           main] urceCloudServiceBeanFactoryPostProcessor : Skipping auto-reconfiguring beans of type javax.sql.DataSource
@@ -105,7 +105,7 @@ Pros: The auto-reconfiguration JAR backed off so there is only one `DataSource`,
 
 Cons: It doesn't work without `VCAP_*` environment variables. It also relies on user remembering to ceate the `Cloud` as a `@Bean` in order to disable the autoconfiguration.
 
-Summary: we are still not in a comfortable place (an app that doesn't run without some intricate wrangling of environment variables is not much use).
+Summary: we are still not in a comfortable place (an app that doesn't run without some intricate wrangling of environment variables is not much use in practice).
 
 ## Dual Running: Local with H2, in the Cloud with MySQL
 
@@ -237,6 +237,47 @@ public class LocalDataSourceConfiguration {
 
 (where the `DataSourceBuilder` would be replaced with whatever fancy logic you need for your use case). And the `application.properties` would be the same as above, with whatever additional properties you need for your production settings.
 
+## A Third Way: Discover the Credentials and Bind Manually
+
+Another approach that lends itself to plaform and environment independence is to declare explicit bean definitions for the `@ConfigurationProperties` beans that Spring Boot uses to bind its autoconfigured connectors. For instance, to set the default values for a `DataSource` you can declare a `@Bean` of type `DataSourceProperties`:
+
+```java
+@Bean
+@Primary
+public DataSourceProperties dataSourceProperties() {
+    DataSourceProperties properties = new DataSourceProperties();
+    properties.setInitialize(false);
+    return properties;
+}
+```
+
+This sets a default value for the "initialize" flag, and allows other properties to be bound from `application.properties` (or other external properties). Combine this with the Spring Cloud Connectors and you can control the binding of the credentials when a cloud service is detected:
+
+```java
+@Bean
+@Primary
+public DataSourceProperties dataSourceProperties() {
+    DataSourceProperties properties = new DataSourceProperties();
+    properties.setInitialize(false);
+    try {
+      CloudFactory factory = new CloudFactory();
+      List<ServiceInfo> infos = factory.getCloud().getServiceInfos(RelationalServiceInfo.class);
+      if (infos.size()==1) {
+        RelationalServiceInfo info = (RelationalServiceInfo) infos.get(0);
+        properties.setUrl(info.getJdbcUrl());
+        properties.setUsername(info.getUserName());
+        properties.setPassword(info.getPassword());
+      }
+    } catch (CloudException e) { // ignore
+    }
+    return properties;
+}
+```
+
+It ends up being quite a lot of code, and is quite unnecessary in this simple use case, but might be handy if you have more complicated bindings, or need to implement some logic to choose a `DataSource` at runtime.
+
+Spring Boot has similar `*Properties` beans for the other middleware you might commonly use (e.g. `RabbitProperties`, `RedisProperties`, `MongoProperties`). An instance of such a bean marked as `@Primary` is enough to reset the defaults for the autoconfigured connector.
+
 ## Summary of Autoconfiguration and Provided Behaviour
 
 * Spring Boot provides `DataSource` (also RabbitMQ or Redis `ConnectionFactory`, Mongo etc.) if it finds all the right stuff on the classpath. Using the "spring-boot-starter-*" dependencies is sufficient to activate the behaviour.
@@ -251,10 +292,12 @@ public class LocalDataSourceConfiguration {
 
 ## General Advice and Conclusion
 
-We have seen quite a few options and autoconfigurations in this short article, and we've only really used thee libraries (Spring Boot, Spring Cloud Connectors, and the Cloud Foundry buildpack auto-reconfiguration JAR) and one platform (Cloud Foundry), not counting local deployment. The buildpack features are really only useful for very simple applications because there is no flexibility to tune the connections in production. That said it is a nice thing to be able to do when prototyping. There are only two main approaches if you want to achieve the goal of deploying the same code locally and in the cloud, yet still being able to make necessary tweaks in production: 
+We have seen quite a few options and autoconfigurations in this short article, and we've only really used thee libraries (Spring Boot, Spring Cloud Connectors, and the Cloud Foundry buildpack auto-reconfiguration JAR) and one platform (Cloud Foundry), not counting local deployment. The buildpack features are really only useful for very simple applications because there is no flexibility to tune the connections in production. That said it is a nice thing to be able to do when prototyping. There are only three main approaches if you want to achieve the goal of deploying the same code locally and in the cloud, yet still being able to make necessary tweaks in production: 
 
 1. Use Spring Cloud Connectors to explicitly create `DataSource` and other middleware connections and protect those `@Beans` with `@Profile("cloud")`. The approach always works, but leads to more code than you might need for many applications.
 
 2. Use the Spring Boot default autoconfiguration and declare the cloud bindings using `application.properties` (or in YAML).
+
+3. Use Spring Cloud Connectors to discover the credentials, and bind them to the Spring Boot `@ConfigurationProperties` as default values if present.
 
 The two approaches are actually not incompatible, and can be mixed using `@ConfigurationProperties` to provide profile-specific overrides of default configuration (e.g. for setting up connection pools in a different way in a production environment). If you have a relatively simple Spring Boot application, the only way to choose between the two approaches is probably personal taste. If you have a non-Spring Boot application then the explicit `@Bean` approach will win, and it will also win if you plan to deploy your application in more than one cloud platform (e.g. Heroku and Cloud Foundry).
