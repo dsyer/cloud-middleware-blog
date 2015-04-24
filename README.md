@@ -12,7 +12,7 @@ If you want to skip the details, and all you need is a recipe for running locall
 
 Your first and simplest option is to simply not define a `DataSource` at all but put H2 on the classpath. Spring Boot will create the H2 embedded `DataSource` for you when you run locally. The Cloud Foundry buildpack will detect a database service binding and create a `DataSource` for you when you run in the cloud. That might be good enough if you just want to get something working.
 
-If you want to run a serious application in production you might want to tweak some of the connection pool settings (e.g. the size of the pool, variour timeouts, the important test on borrow flag). In that case the buildpack auto-reconfiguration `DataSource` will not meet your requirements and you need to choose an alternative, and there are a number of more or less sensible choices. 
+If you want to run a serious application in production you might want to tweak some of the connection pool settings (e.g. the size of the pool, various timeouts, the important test on borrow flag). In that case the buildpack auto-reconfiguration `DataSource` will not meet your requirements and you need to choose an alternative, and there are a number of more or less sensible choices. 
 
 The best choice is probably to create a `DataSource` explicitly using [Spring Cloud Connectors](cloud.spring.io/spring-cloud-connectors), but guarded by the "cloud" profile:
 
@@ -74,7 +74,7 @@ Consider what happens when:
 VCAP_APPLICATION={"name":"application","instance_id":"FOO"}
 VCAP_SERVICES={"mysql":[{"name":"mysql","tags":["mysql"],"credentials":{"uri":"jdbc:mysql://localhost/test"}}]}
 ```
-(the "tags" provides a hint that we want to create a MySQL `DataSource`, the "uri" provides the location, and the "name" becomes a bean ID). The `DataSource` is now using MySQL with the credentials supplied bu the `VCAP_*` environment variables. Spring Boot has some autoconfiguration for the Connectors, so if you looked at the beans in your application you would see a `CloudFactory` bean, and also the `DataSource` bean (with ID "mysql"). The [autoconfiguration](https://github.com/spring-projects/spring-boot/blob/master/spring-boot-autoconfigure/src/main/java/org/springframework/boot/autoconfigure/cloud/CloudAutoConfiguration.java) is equivalent to adding `@ServiceScan` to your application configuration. It is only active if your application runs in the "cloud" profile, and only if there is no existing `@Bean` of type `Cloud`, and the configuration flag `spring.cloud.enabled` is not "false".
+(the "tags" provides a hint that we want to create a MySQL `DataSource`, the "uri" provides the location, and the "name" becomes a bean ID). The `DataSource` is now using MySQL with the credentials supplied by the `VCAP_*` environment variables. Spring Boot has some autoconfiguration for the Connectors, so if you looked at the beans in your application you would see a `CloudFactory` bean, and also the `DataSource` bean (with ID "mysql"). The [autoconfiguration](https://github.com/spring-projects/spring-boot/blob/master/spring-boot-autoconfigure/src/main/java/org/springframework/boot/autoconfigure/cloud/CloudAutoConfiguration.java) is equivalent to adding `@ServiceScan` to your application configuration. It is only active if your application runs in the "cloud" profile, and only if there is no existing `@Bean` of type `Cloud`, and the configuration flag `spring.cloud.enabled` is not "false".
 
 * Add the "auto-reconfiguration" JAR from the Java buildpack (Maven co-ordinates `org.cloudfoundry:auto-reconfiguration:1.7.0.RELEASE`). You can add it as a local dependency to simulate running an application in Cloud Foundry, but it wouldn't be normal to do this with a real application (this is just for experimenting with autoconfiguration). The auto-reconfiguration JAR now has everything it needs to create a `DataSource`, but it doesn't (yet) because it detects that you already have a bean of type `CloudFactory`, one that was added by Spring Boot.
 
@@ -121,7 +121,7 @@ The `DataSource` as we've defined it is useless because it doesn't have a connec
 
 Now add Spring Cloud Connectors back into the classpath the application and see what happens when you run it again. It actually fails on startup! What has happened? The `@ServiceScan` (from Connectors) goes and looks for bound services, and creates bean definitions for them. That's a bit like the buildpack, but different because it doesn't attempt to replace any existing bean definitions of the same type. So you get an autowiring error because there are 2 `DataSources` and no way to choose one to inject into your application in various places where one is needed.
 
-To fix that we are going to have to take control of teh Cloud Connectors (or simply not use them).
+To fix that we are going to have to take control of the Cloud Connectors (or simply not use them).
 
 ### Using a CloudFactory to create a DataSource
 
@@ -179,7 +179,7 @@ If you like creating `DataSource` beans, and you want to do it both locally and 
 
 ```java
 @Configuration
-@Profile("default")
+@Profile("default") // or "!cloud"
 public class LocalDataSourceConfiguration {
 	
 	@Bean
@@ -225,7 +225,7 @@ spring.datasource.password: ${vcap.services.mysql.credentials.password:}
 spring.datasource.testOnBorrow: true
 ```
 
-The "mysql" part of the property names is the service name in Cloud Foundry (so it is set by the user). And of course the same pattern applies to all kinds of services, not just a JDBC `DataSource`. Generally speaking it is good practice to use external configuration and in particular `@ConfigurationPropertues` since they allow maximum flexibility, for instance to override using System properties or environment variables at runtime.
+The "mysql" part of the property names is the service name in Cloud Foundry (so it is set by the user). And of course the same pattern applies to all kinds of services, not just a JDBC `DataSource`. Generally speaking it is good practice to use external configuration and in particular `@ConfigurationProperties` since they allow maximum flexibility, for instance to override using System properties or environment variables at runtime.
 
 > Note: similar features are provided by the Cloud Foundry buildpack, which provides `cloud.services.*` instead of `vcap.services.*`, so you actually end up with more than one way to do this.
 

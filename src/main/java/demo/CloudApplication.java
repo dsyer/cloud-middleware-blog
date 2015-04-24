@@ -16,7 +16,7 @@ public class CloudApplication implements CommandLineRunner {
 	@Override
 	public void run(String... args) throws Exception {
 		org.apache.tomcat.jdbc.pool.DataSource tomcat = (org.apache.tomcat.jdbc.pool.DataSource) dataSource;
-		System.err.println(tomcat.getDriverClassName());
+		System.err.println(tomcat.getDriverClassName() + ", " + tomcat.getUrl());
 	}
 
 	public static void main(String[] args) {
