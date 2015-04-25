@@ -1,20 +1,22 @@
 # Binding to Data Services with Spring Boot in Cloud Foundry
 
-In this article we look at how to bind a Spring Boot application to data services (JDBC, NoSQL, messaging etc.) and the various sources of default and automatic behaviour in Cloud Foundry, providing some guidance about which ones to use and which ones will be active under what conditions. Spring Boot provides a lot of autoconfiguration and external binding features, some of which are relevant to Cloud Foundry, and many of which are not. Spring Cloud Connectors is a library that you can use in your application if you want to create your own components programmatically, but it doesn't do anything "magical" by itself. And finally there is the Cloud Foundry buildpack which has an "auto-reconfiguration" feature that tries to ease the burden of moving simple applications to the cloud. The key to correctly configuring middleware services, like JDBC or AMQP or Mongo, is to understand what each of these tools provides, how they influence each other at runtime, and and to switch parts of them on and off. The goal should be a smooth transition from local execution of an application on a developer's desktop to a test environment in Cloud Foundry, and ultimately to production in Cloud Foundry (or otherwise) with no changes in source code or packaging, per the [twelve-factor application](http://12factor.net) guidelines.
+In this article we look at how to bind a [Spring Boot](http://projects.spring.io/spring-boot) application to data services (JDBC, NoSQL, messaging etc.) and the various sources of default and automatic behaviour in [Cloud Foundry](http://pivotal.io/cloud), providing some guidance about which ones to use and which ones will be active under what conditions. Spring Boot provides a lot of autoconfiguration and external binding features, some of which are relevant to Cloud Foundry, and many of which are not. [Spring Cloud Connectors](http://cloud.spring.io/spring-cloud-connectors) is a library that you can use in your application if you want to create your own components programmatically, but it doesn't do anything "magical" by itself. And finally there is the Cloud Foundry [java buildpack](https://github.com/cloudfoundry/java-buildpack) which has an "auto-reconfiguration" feature that tries to ease the burden of moving simple applications to the cloud. The key to correctly configuring middleware services, like JDBC or AMQP or Mongo, is to understand what each of these tools provides, how they influence each other at runtime, and and to switch parts of them on and off. The goal should be a smooth transition from local execution of an application on a developer's desktop to a test environment in Cloud Foundry, and ultimately to production in Cloud Foundry (or otherwise) with no changes in source code or packaging, per the [twelve-factor application](http://12factor.net) guidelines.
 
 There is some [simple source code](https://github.com/dsyer/cloud-middleware-blog) accompanying this article. To use it you can clone the repository and import it into your favourite IDE. You will need to remove two dependencies from the complete project to get to the same point where we start discussing concrete code samples, namely `spring-boot-starter-cloud-connectors` and `auto-reconfiguration`.
 
-> NOTE: The current co-ordinates for all the libraries being discussed are "org.springframework.boot:spring-boot-*:1.2.3.RELEASE", "org.springframework.boot:spring-cloud-*-connector:1.1.1.RELEASE", "org.cloudfoundry:auto-reconfiguration:1.7.0.RELEASE".
+> NOTE: The current co-ordinates for all the libraries being discussed are `org.springframework.boot:spring-boot-*:1.2.3.RELEASE`, `org.springframework.boot:spring-cloud-*-connector:1.1.1.RELEASE`, `org.cloudfoundry:auto-reconfiguration:1.7.0.RELEASE`.
+
+> TIP: The source code in github includes a `docker-compose.yml` file. You can use that to create a local MySQL database if you don't have one running already. You don't actually need it to run most of the code below, but it might be useful to validate that it will actually work.
 
 ## Punchline for the Impatient
 
 If you want to skip the details, and all you need is a recipe for running locally with H2 and in the cloud with MySQL, then start here and read the rest later when you want to understand in more depth. (Similar options exist for other data services, like RabbitMQ, Redis, Mongo etc.)
 
-Your first and simplest option is to simply not define a `DataSource` at all but put H2 on the classpath. Spring Boot will create the H2 embedded `DataSource` for you when you run locally. The Cloud Foundry buildpack will detect a database service binding and create a `DataSource` for you when you run in the cloud. That might be good enough if you just want to get something working.
+Your first and simplest option is to simply do nothing: do not define a `DataSource` at all but put H2 on the classpath. Spring Boot will create the H2 embedded `DataSource` for you when you run locally. The Cloud Foundry buildpack will detect a database service binding and create a `DataSource` for you when you run in the cloud. If you add Spring Cloud Connectors as well, your app will also work in other cloud platforms, as long as you include a connector. That might be good enough if you just want to get something working.
 
 If you want to run a serious application in production you might want to tweak some of the connection pool settings (e.g. the size of the pool, various timeouts, the important test on borrow flag). In that case the buildpack auto-reconfiguration `DataSource` will not meet your requirements and you need to choose an alternative, and there are a number of more or less sensible choices. 
 
-The best choice is probably to create a `DataSource` explicitly using [Spring Cloud Connectors](cloud.spring.io/spring-cloud-connectors), but guarded by the "cloud" profile:
+The best choice is probably to create a `DataSource` explicitly using [Spring Cloud Connectors](http://cloud.spring.io/spring-cloud-connectors), but guarded by the "cloud" profile:
 
 ```java
 @Configuration
@@ -29,7 +31,7 @@ public class DataSourceConfiguration {
   @Bean
   @ConfigurationProperties(DataSourceProperties.PREFIX)
   public DataSource dataSource() {
-    return cloud().getSingletonServiceConnector(DataSource.class, null);
+    return cloud().getSingletonServiceConnector(DataSourceclass, null);
   }
 
 }
@@ -72,7 +74,7 @@ Consider what happens when:
 * Run in "cloud" profile and provide some environment variables to simulate running in Cloud Foundry and binding to a MySQL service:
 ```
 VCAP_APPLICATION={"name":"application","instance_id":"FOO"}
-VCAP_SERVICES={"mysql":[{"name":"mysql","tags":["mysql"],"credentials":{"uri":"jdbc:mysql://localhost/test"}}]}
+VCAP_SERVICES={"mysql":[{"name":"mysql","tags":["mysql"],"credentials":{"uri":"mysql://root:root@localhost/test"}}]}
 ```
 (the "tags" provides a hint that we want to create a MySQL `DataSource`, the "uri" provides the location, and the "name" becomes a bean ID). The `DataSource` is now using MySQL with the credentials supplied by the `VCAP_*` environment variables. Spring Boot has some autoconfiguration for the Connectors, so if you looked at the beans in your application you would see a `CloudFactory` bean, and also the `DataSource` bean (with ID "mysql"). The [autoconfiguration](https://github.com/spring-projects/spring-boot/blob/master/spring-boot-autoconfigure/src/main/java/org/springframework/boot/autoconfigure/cloud/CloudAutoConfiguration.java) is equivalent to adding `@ServiceScan` to your application configuration. It is only active if your application runs in the "cloud" profile, and only if there is no existing `@Bean` of type `Cloud`, and the configuration flag `spring.cloud.enabled` is not "false".
 
@@ -86,7 +88,17 @@ VCAP_SERVICES={"mysql":[{"name":"mysql","tags":["mysql"],"credentials":{"uri":"j
 
 > TIP: use web and actuator starters with `endpoints.health.sensitive=false` to inspect the `DataSource` quickly through "/health". You can also use the "/beans", "/env" and "/autoconfig" endpoints to see what is going in in the autoconfigurations and why.
 
+
 > NOTE: Running in Cloud Foundry or including auto-reconfiguration JAR in classpath locally both activate the "cloud" profile (for the same reason). The `VCAP_*` env vars are the thing that makes Spring Cloud and/or the auto-reconfiguration JAR create beans.
+
+
+> NOTE: The URL in the `VCAP_SERVICES` is actually not a "jdbc" scheme, which should be mandatory for JDBC connections. This is, however, the format that Cloud Foundry normally presents it in because it works for nearly every language other than Java. Spring Cloud Connectors or the buildpack auto-reconfiguration, if they are creating a `DataSource`, will translate it into a `jdbc:*` URL for you.
+
+
+> NOTE: The MySQL URL also contains user credentials and a database name which are valid for the Docker container created by the `docker-compose.yml` in the sample source code. If you have a local MySQL server with different credentials you could substitute those.
+
+
+> TIP: If you use a local MySQL server and want to verify that it is connected, you can use the "/health" endpoint from the Spring Boot Actuator (included in the sample code already). Or you could create a `schema-mysql.sql` file in the root of the classpath and put a simple keep alive query in it (e.g. `SELECT 1`). Spring Boot will run that on startupso if the app starts successfully you have configured the database correctly.
 
 The auto-reconfiguration JAR is always on the classpath in Cloud Foundry (by default) but it backs off creating any `DataSource` if it finds a `org.springframework.cloud.CloudFactory` bean (which is provided by Spring Boot if the `CloudAutoConfiguration` is active). Thus the net effect of adding it to the classpath, if the Connectors are also present in a Spring Boot application, is only to enable the "cloud" profile. You can see it making the decision to skip auto-reconfiguration in the application logs on startup:
 
@@ -173,6 +185,8 @@ public class DataSourceConfiguration {
 
 With this in place we have a solution that works smoothly both locally and in Cloud Foundry. Locally Spring Boot will create a `DataSource` with an H2 embedded database. In Cloud Foundry it will bind to a singleton service of type `DataSource` and switch off the autconfigured one from Spring Boot. It also has the benefit of working with any platform supported by Spring Cloud Connectors, so the same code will run on Heroku and Cloud Foundry, for instance. Because of the `@ConfigurationProperties` you can bind additional configuration to the `DataSource` to tweak connection pool properties and things like that if you need to in production.
 
+> NOTE: We have been using MySQL as an example database server, but actually PostgreSQL is at least as compelling a choice if not more. When paired with H2 locally, for instance, you can put H2 into its "Postgres compatibility" mode and use the same SQL in both environments.
+
 ## Manually Creating a Local and a Cloud DataSource
 
 If you like creating `DataSource` beans, and you want to do it both locally and in the cloud, you could use 2 profiles ("cloud" and "local"), for example. But then you would have to find a way to activate the "local" profile by default when not in the cloud. There is already a way to do that built into Spring because there is always a default profile called "default" (by default). So this should work:
@@ -216,22 +230,22 @@ If you don't want to use H2 or any in-memory database locally, then you can't re
 
 ## A Purely Declarative Approach
 
-If you prefer not to write Java code, or don't want to use Spring Cloud Connectors, you might want to try and use Spring Boot autoconfiguration and external properties (or YAML) files for everything. For example Spring Boot creates a `DataSource` for you if it finds the right stuff on the classpath, and it can be completely controlled through `application.properties`, including all the granular features on the `DataSource` that you need in production (like pool sizes and validation queries). So all you need is a way to discover the location and credentials for the service from the environment. Spring Boot also provides a `VcapApplicationListener` which translates Cloud Foundry `VCAP_*` environment variables into usable property sources in the Spring `Environment`. Thus, for instance, a `DataSource` configuration might look like this:
+If you prefer not to write Java code, or don't want to use Spring Cloud Connectors, you might want to try and use Spring Boot autoconfiguration and external properties (or YAML) files for everything. For example Spring Boot creates a `DataSource` for you if it finds the right stuff on the classpath, and it can be completely controlled through `application.properties`, including all the granular features on the `DataSource` that you need in production (like pool sizes and validation queries). So all you need is a way to discover the location and credentials for the service from the environment. The buildpack translates Cloud Foundry `VCAP_*` environment variables into usable property sources in the Spring `Environment`. Thus, for instance, a `DataSource` configuration might look like this:
 
 ```properties
-spring.datasource.url: ${vcap.services.mysql.credentials.uri:jdbc:h2:mem:testdb}
-spring.datasource.username: ${vcap.services.mysql.credentials.username:sa}
-spring.datasource.password: ${vcap.services.mysql.credentials.password:}
+spring.datasource.url: ${cloud.services.mysql.connection.jdbcurl:jdbc:h2:mem:testdb}
+spring.datasource.username: ${cloud.services.mysql.connection.username:sa}
+spring.datasource.password: ${cloud.services.mysql.connection.password:}
 spring.datasource.testOnBorrow: true
 ```
 
 The "mysql" part of the property names is the service name in Cloud Foundry (so it is set by the user). And of course the same pattern applies to all kinds of services, not just a JDBC `DataSource`. Generally speaking it is good practice to use external configuration and in particular `@ConfigurationProperties` since they allow maximum flexibility, for instance to override using System properties or environment variables at runtime.
 
-> Note: similar features are provided by the Cloud Foundry buildpack, which provides `cloud.services.*` instead of `vcap.services.*`, so you actually end up with more than one way to do this.
+> Note: similar features are provided by Spring Boot, which provides `vcap.services.*` instead of `cloud.services.*`, so you actually end up with more than one way to do this. However, the JDBC urls are not available from the `vcap.services.*` properties (non-JDBC services work fine with tthe corresponding `vcap.services.*credentials.url`).
 
 One limitation of this approach is it doesn't apply if the application needs to configure beans that are not provided by Spring Boot out of the box (e.g. if you need 2 `DataSources`), in which case you have to write Java code anyway, and may or may not choose to use properties files to parameterize it.
 
-Before you try this yourself, though, beware that actually it doesn't work unless you also disable the buildpack auto-reconfiguration (and Spring Cloud Connectors if they are on the classpath). If you don't, then they create a new `DataSource` for you and don't let Spring Boot bind it to your properties file. Thus even for this declarative approach, you end up needing an explicit `@Bean` definition, and you need this part of your "cloud" profile configuration:
+Before you try this yourself, though, beware that actually it doesn't work unless you also disable the buildpack auto-reconfiguration (and Spring Cloud Connectors if they are on the classpath). If you don't do that, then they create a new `DataSource` for you and Spring Boot cannot bind it to your properties file. Thus even for this declarative approach, you end up needing an explicit `@Bean` definition, and you need this part of your "cloud" profile configuration:
 
 ```java
 @Configuration
