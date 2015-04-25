@@ -355,3 +355,5 @@ We have seen quite a few options and autoconfigurations in this short article, a
 3. Use Spring Cloud Connectors to discover the credentials, and bind them to the Spring Boot `@ConfigurationProperties` as default values if present.
 
 The three approaches are actually not incompatible, and can be mixed using `@ConfigurationProperties` to provide profile-specific overrides of default configuration (e.g. for setting up connection pools in a different way in a production environment). If you have a relatively simple Spring Boot application, the only way to choose between the approaches is probably personal taste. If you have a non-Spring Boot application then the explicit `@Bean` approach will win, and it may also win if you plan to deploy your application in more than one cloud platform (e.g. Heroku and Cloud Foundry).
+
+> NOTE: This blog has been a journey of discovery (who knew there was so much to learn>?). Thanks go to all those who helped with reviews and comments, in particular[Scott Frederick](), who spotted most of the mistakes in the drafts and always had time to look at a new revision.
