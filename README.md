@@ -4,7 +4,7 @@ In this article we look at how to bind a [Spring Boot](http://projects.spring.io
 
 There is some [simple source code](https://github.com/dsyer/cloud-middleware-blog) accompanying this article. To use it you can clone the repository and import it into your favourite IDE. You will need to remove two dependencies from the complete project to get to the same point where we start discussing concrete code samples, namely `spring-boot-starter-cloud-connectors` and `auto-reconfiguration`.
 
-> NOTE: The current co-ordinates for all the libraries being discussed are `org.springframework.boot:spring-boot-*:1.2.3.RELEASE`, `org.springframework.boot:spring-cloud-*-connector:1.1.1.RELEASE`, `org.cloudfoundry:auto-reconfiguration:1.7.0.RELEASE`.
+> NOTE: The current co-ordinates for all the libraries being discussed are `org.springframework.boot:spring-boot-*:1.2.3.RELEASE`, `org.springframework.cloud:spring-cloud-*-connector:1.1.1.RELEASE`, `org.cloudfoundry:auto-reconfiguration:1.7.0.RELEASE`.
 
 > TIP: The source code in github includes a `docker-compose.yml` file. You can use that to create a local MySQL database if you don't have one running already. You don't actually need it to run most of the code below, but it might be useful to validate that it will actually work.
 
