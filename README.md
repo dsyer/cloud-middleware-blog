@@ -135,7 +135,7 @@ Now add Spring Cloud Connectors back into the classpath the application and see 
 
 To fix that we are going to have to take control of the Cloud Connectors (or simply not use them).
 
-### Using a CloudFactory to create a DataSource
+### Using CloudFactory to create a DataSource
 
 You can disable the Spring Boot autoconfiguration *and* the Java buildpack auto-reconfiguration by creating your own `Cloud` instance as a `@Bean`:
 
